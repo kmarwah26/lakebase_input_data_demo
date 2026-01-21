@@ -145,10 +145,6 @@ def _generate_pet_id() -> str:
 
 
 def _create_schema_and_table(engine: Engine) -> None:
-    create_schema_sql = f"""
-        CREATE SCHEMA IF NOT EXISTS "{CATALOG_NAME}"."{SCHEMA_NAME}";
-    """
-
     create_table_sql = f"""
         CREATE TABLE IF NOT EXISTS {_qualified_table_name()} (
             id SERIAL PRIMARY KEY,
@@ -168,7 +164,6 @@ def _create_schema_and_table(engine: Engine) -> None:
     """
 
     with engine.connect() as conn:
-        conn.execute(text(create_schema_sql))
         conn.execute(text(create_table_sql))
         conn.commit()
 
