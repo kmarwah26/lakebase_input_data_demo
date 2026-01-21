@@ -2,13 +2,13 @@ import datetime
 import uuid
 
 import streamlit as st
-import psycopg2
+from sqlalchemy import create_engine, text
+from sqlalchemy.engine import Engine
 
 try:
     from credentials import token as LAKEBASE_OAUTH_TOKEN
 except ImportError:
     LAKEBASE_OAUTH_TOKEN = None
-from psycopg2.extras import RealDictCursor
 
 
 def main() -> None:
@@ -115,16 +115,20 @@ def main() -> None:
             st.info("No Pet records found yet.")
 
 
-def _get_db_config() -> dict:
+def _get_engine() -> Engine:
     oauth_token = LAKEBASE_OAUTH_TOKEN
-    return {
-        "host": "instance-2b603f87-f846-4e86-811e-f56e4f96e2c5.database.azuredatabricks.net",
-        "port": 5432,
-        "dbname": "databricks_postgres",
-        "user": "token" if oauth_token else "kunal.marwah@databricks.com",
-        "password": oauth_token,
-        "sslmode": "require",
-    }
+    if not oauth_token:
+        raise ValueError(
+            "Missing OAuth token. Set it in credentials.py as token = '...'."
+        )
+    
+    host = "instance-2b603f87-f846-4e86-811e-f56e4f96e2c5.database.azuredatabricks.net"
+    port = 5432
+    dbname = "databricks_postgres"
+    user = "token"
+    
+    connection_string = f"postgresql://{user}:{oauth_token}@{host}:{port}/{dbname}?sslmode=require"
+    return create_engine(connection_string)
 
 
 CATALOG_NAME = "pet_data"
@@ -140,7 +144,7 @@ def _generate_pet_id() -> str:
     return f"PET-{uuid.uuid4().hex[:10].upper()}"
 
 
-def _create_schema_and_table(cur: RealDictCursor) -> None:
+def _create_schema_and_table(engine: Engine) -> None:
     create_schema_sql = f"""
         CREATE SCHEMA IF NOT EXISTS "{CATALOG_NAME}"."{SCHEMA_NAME}";
     """
@@ -163,16 +167,15 @@ def _create_schema_and_table(cur: RealDictCursor) -> None:
         );
     """
 
-    cur.execute(create_schema_sql)
-    cur.execute(create_table_sql)
+    with engine.connect() as conn:
+        conn.execute(text(create_schema_sql))
+        conn.execute(text(create_table_sql))
+        conn.commit()
 
 
 def insert_Pet_intake(payload: dict) -> None:
-    config = _get_db_config()
-    if not config["password"]:
-        raise ValueError(
-            "Missing OAuth token. Set it in credentials.py as token = '...'."
-        )
+    engine = _get_engine()
+    _create_schema_and_table(engine)
 
     insert_sql = f"""
         INSERT INTO {_qualified_table_name()} (
@@ -188,33 +191,28 @@ def insert_Pet_intake(payload: dict) -> None:
             allergies,
             additional_notes
         ) VALUES (
-            %(full_name)s,
-            %(Pet_id)s,
-            %(date_of_birth)s,
-            %(phone)s,
-            %(email)s,
-            %(address)s,
-            %(visit_date)s,
-            %(department)s,
-            %(symptoms)s,
-            %(allergies)s,
-            %(additional_notes)s
+            :full_name,
+            :Pet_id,
+            :date_of_birth,
+            :phone,
+            :email,
+            :address,
+            :visit_date,
+            :department,
+            :symptoms,
+            :allergies,
+            :additional_notes
         );
     """
 
-    with psycopg2.connect(cursor_factory=RealDictCursor, **config) as conn:
-        with conn.cursor() as cur:
-            _create_schema_and_table(cur)
-            cur.execute(insert_sql, payload)
+    with engine.connect() as conn:
+        conn.execute(text(insert_sql), payload)
         conn.commit()
 
 
 def fetch_Pet_records() -> list[dict]:
-    config = _get_db_config()
-    if not config["password"]:
-        raise ValueError(
-            "Missing OAuth token. Set it in credentials.py as token = '...'."
-        )
+    engine = _get_engine()
+    _create_schema_and_table(engine)
 
     select_sql = f"""
         SELECT
@@ -235,13 +233,10 @@ def fetch_Pet_records() -> list[dict]:
         ORDER BY created_at DESC;
     """
 
-    with psycopg2.connect(cursor_factory=RealDictCursor, **config) as conn:
-        with conn.cursor() as cur:
-            _create_schema_and_table(cur)
-            cur.execute(select_sql)
-            rows = cur.fetchall()
-        conn.commit()
-
+    with engine.connect() as conn:
+        result = conn.execute(text(select_sql))
+        rows = result.mappings().all()
+    
     return [dict(row) for row in rows]
 
 
