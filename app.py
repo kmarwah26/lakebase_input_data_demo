@@ -5,34 +5,37 @@ import streamlit as st
 import datetime
 
 
-## Define variables
-instance_name = "lakebase-app-demo-instance" 
-
-## Initialize the Databricks SDK `WorkspaceClient
-w = WorkspaceClient()
-
-## Obtain a temporary connection credential that uses your Databricks identity for secure access. 
-cred = w.database.generate_database_credential(
-                        request_id=str(uuid.uuid4()),   # The request_id parameter uses a unique UUID to ensure each request is traceable.
-                        instance_names=[instance_name]  # Lakebase instance name from the variable above
-                    )
-
-current_user = w.current_user.me().user_name
-instance = w.database.get_database_instance(name=instance_name)
-
-## b. Connection parameters
-conn = psycopg.connect(
-    host = instance.read_write_dns,
-    dbname = "databricks_postgres",   ## Your database name within your Lakebase instance
-    user = current_user,              ## Your user name with email
-    password = cred.token,            ## Your credential from an above cell
-    sslmode = "require"
-)
-
-
 CATALOG_NAME = "pet_data"
 SCHEMA_NAME = "public"
 TABLE_NAME = "pet_records"
+INSTANCE_NAME = "lakebase-app-demo-instance"
+
+
+def _get_connection():
+    """Initialize connection to Lakebase using Databricks SDK."""
+    if "db_conn" not in st.session_state:
+        # Initialize the Databricks SDK WorkspaceClient
+        w = WorkspaceClient()
+        
+        # Obtain a temporary connection credential
+        cred = w.database.generate_database_credential(
+            request_id=str(uuid.uuid4()),
+            instance_names=[INSTANCE_NAME]
+        )
+        
+        current_user = w.current_user.me().user_name
+        instance = w.database.get_database_instance(name=INSTANCE_NAME)
+        
+        # Connection parameters
+        st.session_state.db_conn = psycopg.connect(
+            host=instance.read_write_dns,
+            dbname="databricks_postgres",
+            user=current_user,
+            password=cred.token,
+            sslmode="require"
+        )
+    
+    return st.session_state.db_conn
 
 
 def _qualified_table_name() -> str:
@@ -44,6 +47,7 @@ def _generate_pet_id() -> str:
 
 
 def _create_schema_and_table() -> None:
+    conn = _get_connection()
     conn.rollback()  # Clear any failed transaction state
     create_table_sql = f"""
         CREATE TABLE IF NOT EXISTS {_qualified_table_name()} (
@@ -69,6 +73,7 @@ def _create_schema_and_table() -> None:
 
 
 def insert_Pet_intake(payload: dict) -> None:
+    conn = _get_connection()
     _create_schema_and_table()
 
     insert_sql = f"""
@@ -105,6 +110,7 @@ def insert_Pet_intake(payload: dict) -> None:
 
 
 def fetch_Pet_records() -> list[dict]:
+    conn = _get_connection()
     _create_schema_and_table()
 
     select_sql = f"""
