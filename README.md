@@ -1,1 +1,0 @@
-# lakebase_input_data_demo

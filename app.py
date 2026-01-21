@@ -4,7 +4,6 @@ import uuid
 import streamlit as st
 import datetime
 
-
 CATALOG_NAME = "pet_data"
 SCHEMA_NAME = "public"
 TABLE_NAME = "pet_records"
@@ -244,5 +243,5 @@ def main() -> None:
             st.info("No Pet records found yet.")
 
 
-if __name__ == "__main__":
-    main()
+
+main()
