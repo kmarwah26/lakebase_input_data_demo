@@ -18,6 +18,7 @@ cred = w.database.generate_database_credential(
                     )
 
 current_user = w.current_user.me().user_name
+instance = w.database.get_database_instance(name=instance_name)
 
 ## b. Connection parameters
 conn = psycopg.connect(
