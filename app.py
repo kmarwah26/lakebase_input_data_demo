@@ -3,6 +3,7 @@ from databricks.sdk import WorkspaceClient
 import uuid
 import streamlit as st
 import datetime
+import pandas as pd
 
 CATALOG_NAME = "pet_data"
 SCHEMA_NAME = "public"
@@ -139,6 +140,20 @@ def fetch_Pet_records() -> list[dict]:
     return [dict(zip(columns, row)) for row in rows]
 
 
+def delete_Pet_records(record_ids: list[int]) -> None:
+    """Delete pet records by their IDs."""
+    conn = _get_connection()
+    
+    delete_sql = f"""
+        DELETE FROM {_qualified_table_name()}
+        WHERE id = ANY(%(ids)s);
+    """
+    
+    with conn.cursor() as cur:
+        cur.execute(delete_sql, {"ids": record_ids})
+    conn.commit()
+
+
 def main() -> None:
     st.set_page_config(page_title="Banfield Pet Hospital Intake", page_icon="🏥")
     st.title("Banfield Pet Hospital Intake Form")
@@ -238,7 +253,33 @@ def main() -> None:
             return
 
         if records:
-            st.dataframe(records, use_container_width=True)
+            df = pd.DataFrame(records)
+            
+            # Use data_editor with selection enabled
+            edited_df = st.data_editor(
+                df,
+                use_container_width=True,
+                hide_index=True,
+                disabled=True,  # Make all columns read-only
+                key="pet_records_table"
+            )
+            
+            # Multi-select for deletion
+            st.write("### Delete Records")
+            selected_ids = st.multiselect(
+                "Select record IDs to delete:",
+                options=df["id"].tolist(),
+                format_func=lambda x: f"ID {x} - {df[df['id']==x]['full_name'].values[0]}"
+            )
+            
+            if selected_ids:
+                if st.button("Delete Selected Records", type="primary"):
+                    try:
+                        delete_Pet_records(selected_ids)
+                        st.success(f"Deleted {len(selected_ids)} record(s).")
+                        st.rerun()
+                    except Exception as exc:  # noqa: BLE001
+                        st.error(f"Delete failed: {exc}")
         else:
             st.info("No Pet records found yet.")
 
