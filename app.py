@@ -125,7 +125,7 @@ def _get_engine() -> Engine:
     host = "instance-2b603f87-f846-4e86-811e-f56e4f96e2c5.database.azuredatabricks.net"
     port = 5432
     dbname = "databricks_postgres"
-    user = "token"
+    user = "kunal.marwah@databricks.com"
     
     connection_string = f"postgresql://{user}:{oauth_token}@{host}:{port}/{dbname}?sslmode=require"
     return create_engine(connection_string)
