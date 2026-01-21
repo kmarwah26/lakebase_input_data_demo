@@ -1,14 +1,136 @@
-import datetime
+import psycopg
+from databricks.sdk import WorkspaceClient
 import uuid
-
 import streamlit as st
-from sqlalchemy import create_engine, text
-from sqlalchemy.engine import Engine
+import datetime
 
-try:
-    from credentials import token as LAKEBASE_OAUTH_TOKEN
-except ImportError:
-    LAKEBASE_OAUTH_TOKEN = None
+
+## Define variables
+instance_name = "lakebase-app-demo-instance" 
+
+## Initialize the Databricks SDK `WorkspaceClient
+w = WorkspaceClient()
+
+## Obtain a temporary connection credential that uses your Databricks identity for secure access. 
+cred = w.database.generate_database_credential(
+                        request_id=str(uuid.uuid4()),   # The request_id parameter uses a unique UUID to ensure each request is traceable.
+                        instance_names=[instance_name]  # Lakebase instance name from the variable above
+                    )
+
+current_user = w.current_user.me().user_name
+
+## b. Connection parameters
+conn = psycopg.connect(
+    host = instance.read_write_dns,
+    dbname = "databricks_postgres",   ## Your database name within your Lakebase instance
+    user = current_user,              ## Your user name with email
+    password = cred.token,            ## Your credential from an above cell
+    sslmode = "require"
+)
+
+
+CATALOG_NAME = "pet_data"
+SCHEMA_NAME = "public"
+TABLE_NAME = "pet_records"
+
+
+def _qualified_table_name() -> str:
+    return f'"{SCHEMA_NAME}"."{TABLE_NAME}"'
+
+
+def _generate_pet_id() -> str:
+    return f"PET-{uuid.uuid4().hex[:10].upper()}"
+
+
+def _create_schema_and_table() -> None:
+    conn.rollback()  # Clear any failed transaction state
+    create_table_sql = f"""
+        CREATE TABLE IF NOT EXISTS {_qualified_table_name()} (
+            id SERIAL PRIMARY KEY,
+            full_name TEXT NOT NULL,
+            Pet_id TEXT,
+            date_of_birth DATE NOT NULL,
+            phone TEXT,
+            email TEXT,
+            address TEXT,
+            visit_date DATE,
+            department TEXT,
+            symptoms TEXT,
+            allergies TEXT,
+            additional_notes TEXT,
+            created_at TIMESTAMPTZ DEFAULT NOW()
+        );
+    """
+
+    with conn.cursor() as cur:
+        cur.execute(create_table_sql)
+    conn.commit()
+
+
+def insert_Pet_intake(payload: dict) -> None:
+    _create_schema_and_table()
+
+    insert_sql = f"""
+        INSERT INTO {_qualified_table_name()} (
+            full_name,
+            Pet_id,
+            date_of_birth,
+            phone,
+            email,
+            address,
+            visit_date,
+            department,
+            symptoms,
+            allergies,
+            additional_notes
+        ) VALUES (
+            %(full_name)s,
+            %(Pet_id)s,
+            %(date_of_birth)s,
+            %(phone)s,
+            %(email)s,
+            %(address)s,
+            %(visit_date)s,
+            %(department)s,
+            %(symptoms)s,
+            %(allergies)s,
+            %(additional_notes)s
+        );
+    """
+
+    with conn.cursor() as cur:
+        cur.execute(insert_sql, payload)
+    conn.commit()
+
+
+def fetch_Pet_records() -> list[dict]:
+    _create_schema_and_table()
+
+    select_sql = f"""
+        SELECT
+            id,
+            full_name,
+            Pet_id,
+            date_of_birth,
+            phone,
+            email,
+            address,
+            visit_date,
+            department,
+            symptoms,
+            allergies,
+            additional_notes,
+            created_at
+        FROM {_qualified_table_name()}
+        ORDER BY created_at DESC;
+    """
+
+    with conn.cursor() as cur:
+        cur.execute(select_sql)
+        columns = [desc[0] for desc in cur.description]
+        rows = cur.fetchall()
+    
+    return [dict(zip(columns, row)) for row in rows]
 
 
 def main() -> None:
@@ -115,126 +237,5 @@ def main() -> None:
             st.info("No Pet records found yet.")
 
 
-def _get_engine() -> Engine:
-    oauth_token = LAKEBASE_OAUTH_TOKEN
-    if not oauth_token:
-        raise ValueError(
-            "Missing OAuth token. Set it in credentials.py as token = '...'."
-        )
-    
-    host = "instance-2b603f87-f846-4e86-811e-f56e4f96e2c5.database.azuredatabricks.net"
-    port = 5432
-    dbname = "databricks_postgres"
-    user = "kunal.marwah@databricks.com"
-    
-    connection_string = f"postgresql://{user}:{oauth_token}@{host}:{port}/{dbname}?sslmode=require"
-    return create_engine(connection_string)
-
-
-CATALOG_NAME = "pet_data"
-SCHEMA_NAME = "public"
-TABLE_NAME = "pet_records"
-
-
-def _qualified_table_name() -> str:
-    return f'"{CATALOG_NAME}"."{SCHEMA_NAME}"."{TABLE_NAME}"'
-
-
-def _generate_pet_id() -> str:
-    return f"PET-{uuid.uuid4().hex[:10].upper()}"
-
-
-def _create_schema_and_table(engine: Engine) -> None:
-    create_table_sql = f"""
-        CREATE TABLE IF NOT EXISTS {_qualified_table_name()} (
-            id SERIAL PRIMARY KEY,
-            full_name TEXT NOT NULL,
-            Pet_id TEXT,
-            date_of_birth DATE NOT NULL,
-            phone TEXT,
-            email TEXT,
-            address TEXT,
-            visit_date DATE,
-            department TEXT,
-            symptoms TEXT,
-            allergies TEXT,
-            additional_notes TEXT,
-            created_at TIMESTAMPTZ DEFAULT NOW()
-        );
-    """
-
-    with engine.connect() as conn:
-        conn.execute(text(create_table_sql))
-        conn.commit()
-
-
-def insert_Pet_intake(payload: dict) -> None:
-    engine = _get_engine()
-    _create_schema_and_table(engine)
-
-    insert_sql = f"""
-        INSERT INTO {_qualified_table_name()} (
-            full_name,
-            Pet_id,
-            date_of_birth,
-            phone,
-            email,
-            address,
-            visit_date,
-            department,
-            symptoms,
-            allergies,
-            additional_notes
-        ) VALUES (
-            :full_name,
-            :Pet_id,
-            :date_of_birth,
-            :phone,
-            :email,
-            :address,
-            :visit_date,
-            :department,
-            :symptoms,
-            :allergies,
-            :additional_notes
-        );
-    """
-
-    with engine.connect() as conn:
-        conn.execute(text(insert_sql), payload)
-        conn.commit()
-
-
-def fetch_Pet_records() -> list[dict]:
-    engine = _get_engine()
-    _create_schema_and_table(engine)
-
-    select_sql = f"""
-        SELECT
-            id,
-            full_name,
-            Pet_id,
-            date_of_birth,
-            phone,
-            email,
-            address,
-            visit_date,
-            department,
-            symptoms,
-            allergies,
-            additional_notes,
-            created_at
-        FROM {_qualified_table_name()}
-        ORDER BY created_at DESC;
-    """
-
-    with engine.connect() as conn:
-        result = conn.execute(text(select_sql))
-        rows = result.mappings().all()
-    
-    return [dict(row) for row in rows]
-
-
 if __name__ == "__main__":
     main()
-
